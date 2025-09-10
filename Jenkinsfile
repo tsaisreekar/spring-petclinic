@@ -58,16 +58,27 @@ pipeline {
                     sh """
                         ssh -o StrictHostKeyChecking=no ${APP_HOST} '
                             set -e
-                            kubectl -n default get deploy || true
-                            kubectl set image deployment/petclinic petclinic=${DOCKER_IMAGE}:latest --record || true
-                            if ! kubectl get deploy petclinic >/dev/null 2>&1; then
-                                sed -i "s|DOCKERHUB_USER/petclinic:latest|${DOCKER_IMAGE}:latest|g" /home/ubuntu/k8s/deployment.yaml || true
+                            # Check if deployment exists
+                            if kubectl get deploy petclinic >/dev/null 2>&1; then
+                                # Update image
+                                kubectl set image deployment/petclinic petclinic=${DOCKER_IMAGE}:latest --record
+                            else
+                                # Replace placeholder in manifest
+                                sed -i "s|DOCKERHUB_USER/petclinic:latest|${DOCKER_IMAGE}:latest|g" /home/ubuntu/k8s/deployment.yaml
                                 kubectl apply -f /home/ubuntu/k8s/deployment.yaml
                                 kubectl apply -f /home/ubuntu/k8s/service-nodeport.yaml
                             fi
                         '
                     """
                 }
+            }
+        }
+
+        stage('Smoke Test') {
+            steps {
+                echo "Waiting 15s for pods to start..."
+                sleep 15
+                sh "ssh -o StrictHostKeyChecking=no ${APP_HOST} 'curl -sS http://localhost:30080/actuator/health || true'"
             }
         }
     }
@@ -78,6 +89,6 @@ pipeline {
         }
         failure {
             echo "Pipeline failed - check console logs."
-        }
-    }
+        }
+    }
 }
