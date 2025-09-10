@@ -52,24 +52,41 @@ pipeline {
             }
         }
 
-        stage('Deploy to Minikube on App-Server') {
-            steps {
-                sshagent([env.APP_SSH_CRED]) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ${APP_HOST} '
-                            set -e
-                            kubectl -n default get deploy || true
-                            kubectl set image deployment/petclinic petclinic=${DOCKER_IMAGE}:latest --record || true
-                            if ! kubectl get deploy petclinic >/dev/null 2>&1; then
-                                sed -i "s|DOCKERHUB_USER/petclinic:latest|${DOCKER_IMAGE}:latest|g" /home/ubuntu/k8s/deployment.yaml || true
-                                kubectl apply -f /home/ubuntu/k8s/deployment.yaml
-                                kubectl apply -f /home/ubuntu/k8s/service-nodeport.yaml
-                            fi
-                        '
-                    """
+       stage('Deploy to minikube on app-server') {
+           steps {
+               sshagent (credentials: ['app-server-ssh']) {
+                   sh """
+                   ssh -o StrictHostKeyChecking=no ${APP_HOST} '
+                   set -e
+                   # Install git if not present
+                   which git || sudo apt-get update && sudo apt-get install -y git
+
+                   # Clone (or pull) your repo with k8s manifests
+                   if [ ! -d ~/spring-petclinic ]; then
+                   git clone https://github.com/tsaisreekar/spring-petclinic.git ~/spring-petclinic
+                   else
+                   cd ~/spring-petclinic && git pull
+                   fi
+
+                   # Set KUBECONFIG if using minikube
+                   export KUBECONFIG=$HOME/.kube/config
+            
+                   # Ensure minikube is running
+                   minikube status || minikube start
+            
+                   # Update image
+                   kubectl -n default get deploy || true
+                   kubectl set image deployment/petclinic petclinic=${DOCKER_IMAGE}:latest --record || true
+                   # Apply manifests if deployment does not exist
+                   if ! kubectl get deploy petclinic >/dev/null 2>&1; then
+                   kubectl apply -f ~/spring-petclinic/k8s/deployment.yaml
+                   kubectl apply -f ~/spring-petclinic/k8s/service-nodeport.yaml
+                   fi
+                  '
+                  """
                 }
+              }
             }
-        }
 
         stage('Smoke Test') {
             steps {
