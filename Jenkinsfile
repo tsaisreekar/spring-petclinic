@@ -1,5 +1,10 @@
 pipeline {
   agent any
+
+  tools{
+    jdk 'Java17'
+    maven 'Maven3'
+  }
   environment {
     DOCKERHUB_CRED = 'dockerhub-cred'          // set in Jenkins
     DOCKER_IMAGE = 'tsaisreekar/spring-petclinic'  // replace before pushing or set env in Jenkins
