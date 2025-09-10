@@ -6,10 +6,10 @@ pipeline {
     maven 'Maven3'
   }
   environment {
-    DOCKERHUB_CRED = 'dockerhub-cred'          // set in Jenkins
-    DOCKER_IMAGE = 'tsaisreekar/spring-petclinic'  // replace before pushing or set env in Jenkins
-    APP_SSH_CRED = 'app-server-ssh'            // Jenkins credential ID for SSH
-    APP_HOST = 'ubuntu@44.252.99.35'               // replace with your app-server public IP
+    DOCKERHUB_CRED = 'dockerhub-cred'
+    DOCKER_IMAGE = 'tsaisreekar/spring-petclinic'
+    APP_SSH_CRED = 'app-server-ssh'
+    APP_HOST = 'ubuntu@44.252.99.35'
   }
   stages {
     stage('Checkout') {
@@ -68,4 +68,5 @@ pipeline {
         }
       }
     }
-}
+  }
+} 
