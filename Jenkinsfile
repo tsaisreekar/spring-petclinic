@@ -48,25 +48,21 @@ pipeline {
     }
     stage('Deploy to minikube on app-server') {
       steps {
-        sshagent (credentials: ["${env.APP_SSH_CRED}"]) {
+        sshagent (credentials: ['app-server-ssh']) {
           sh """
-            ssh -o StrictHostKeyChecking=no ${APP_HOST} '
-              set -e
-              # ensure kubectl context is minikube on app-server
-              kubectl -n default get deploy || true
-              # update image
-              kubectl set image deployment/petclinic petclinic=${DOCKER_IMAGE}:latest --record || true
-              # if deployment doesn't exist, apply manifests
-              if ! kubectl get deploy petclinic >/dev/null 2>&1; then
-                # replace placeholder in manifest and apply
-                sed -i \"s|DOCKERHUB_USER/petclinic:latest|${DOCKER_IMAGE}:latest|g\" /home/ubuntu/k8s/deployment.yaml || true
-                kubectl apply -f /home/ubuntu/k8s/deployment.yaml
-                kubectl apply -f /home/ubuntu/k8s/service-nodeport.yaml
-              fi
-            '
-          """
-        }
-      }
+          ssh -o StrictHostKeyChecking=no ${APP_HOST} '
+          set -e
+          kubectl -n default get deploy || true
+          kubectl set image deployment/petclinic petclinic=${DOCKER_IMAGE}:latest --record || true
+          if ! kubectl get deploy petclinic >/dev/null 2>&1; then
+            sed -i "s|DOCKERHUB_USER/petclinic:latest|${DOCKER_IMAGE}:latest|g" /home/ubuntu/k8s/deployment.yaml || true
+            kubectl apply -f /home/ubuntu/k8s/deployment.yaml
+            kubectl apply -f /home/ubuntu/k8s/service-nodeport.yaml
+          fi
+        '
+      """
+        }
+      }
     }
   }
 } 
