@@ -9,7 +9,7 @@ pipeline {
     environment {
         DOCKERHUB_CRED = 'dockerhub-cred'
         DOCKER_IMAGE = 'tsaisreekar/spring-petclinic'
-        APP_SSH_CRED = 'app-server-ssh'
+        APP_SSH_CRED = 'app-server-ssh'  // Jenkins SSH credential with OpenSSH key
         APP_HOST = 'ubuntu@44.252.99.35'
     }
 
@@ -54,17 +54,14 @@ pipeline {
 
         stage('Deploy to Minikube on App-Server') {
             steps {
-                sshagent (credentials: ['app-server-ssh']) {
+                sshagent([env.APP_SSH_CRED]) {
                     sh """
                         ssh -o StrictHostKeyChecking=no ${APP_HOST} '
                             set -e
-                            # Check if deployment exists
-                            if kubectl get deploy petclinic >/dev/null 2>&1; then
-                                # Update image
-                                kubectl set image deployment/petclinic petclinic=${DOCKER_IMAGE}:latest --record
-                            else
-                                # Replace placeholder in manifest
-                                sed -i "s|DOCKERHUB_USER/petclinic:latest|${DOCKER_IMAGE}:latest|g" /home/ubuntu/k8s/deployment.yaml
+                            kubectl -n default get deploy || true
+                            kubectl set image deployment/petclinic petclinic=${DOCKER_IMAGE}:latest --record || true
+                            if ! kubectl get deploy petclinic >/dev/null 2>&1; then
+                                sed -i "s|DOCKERHUB_USER/petclinic:latest|${DOCKER_IMAGE}:latest|g" /home/ubuntu/k8s/deployment.yaml || true
                                 kubectl apply -f /home/ubuntu/k8s/deployment.yaml
                                 kubectl apply -f /home/ubuntu/k8s/service-nodeport.yaml
                             fi
@@ -76,9 +73,20 @@ pipeline {
 
         stage('Smoke Test') {
             steps {
-                echo "Waiting 15s for pods to start..."
+                echo "Waiting 15s for pods to stabilize..."
                 sleep 15
-                sh "ssh -o StrictHostKeyChecking=no ${APP_HOST} 'curl -sS http://localhost:30080/actuator/health || true'"
+                sshagent([env.APP_SSH_CRED]) {
+                    sh "ssh -o StrictHostKeyChecking=no ${APP_HOST} 'curl -sS http://localhost:30080/actuator/health || true'"
+                }
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                echo "Checking service availability via NodePort..."
+                sshagent([env.APP_SSH_CRED]) {
+                    sh "ssh -o StrictHostKeyChecking=no ${APP_HOST} 'curl -f http://localhost:30080 || exit 1'"
+                }
             }
         }
     }
