@@ -1,62 +1,66 @@
 pipeline {
-    agent any
-
-    tools {
-        maven 'Maven3'      // Jenkins tool name for Maven
-        jdk 'Java17'        // Jenkins tool name for JDK
+  agent any
+  environment {
+    DOCKERHUB_CRED = 'dockerhub-cred'          // set in Jenkins
+    DOCKER_IMAGE = 'tsaisreekar/spring-petclinic'  // replace before pushing or set env in Jenkins
+    APP_SSH_CRED = 'app-server-ssh'            // Jenkins credential ID for SSH
+    APP_HOST = 'ubuntu@44.252.99.35'               // replace with your app-server public IP
+  }
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
     }
-
-    environment {
-        DOCKER_USER = 'tsaisreekar'  // Your Docker Hub username
-        IMAGE_NAME = "${DOCKER_USER}/orders-app:latest"
+    stage('Build JAR') {
+      steps {
+        sh '''
+          if [ -f mvnw ]; then
+            chmod +x ./mvnw
+            ./mvnw -B -DskipTests clean package
+          else
+            mvn -B -DskipTests clean package
+          fi
+        '''
+      }
     }
-
-    stages {
-
-        stage('Checkout') {
-            steps {
-                git branch: 'main', url: 'https://github.com/tsaisreekar/spring-petclinic.git'
-            }
-        }
-
-        stage('Build & Test') {
-            steps {
-                sh 'mvn clean package -DskipTests'
-            }
-        }
-
-        stage('Docker Build & Push') {
-            steps {
-                sh "docker build -t ${IMAGE_NAME} ."
-                withCredentials([string(credentialsId: 'dockerhub-pass', variable: 'DOCKER_PASS')]) {
-                    sh "echo \$DOCKER_PASS | docker login -u ${DOCKER_USER} --password-stdin"
-                    sh "docker push ${IMAGE_NAME}"
-                    sh 'docker logout'
-                }
-            }
-        }
-
-        stage('Deploy to Kubernetes') {
-            steps {
-                sh 'kubectl apply -f k8s/deployment.yaml'
-                sh 'kubectl apply -f k8s/service.yaml'
-            }
-        }
-
-        stage('Health Check') {
-            steps {
-                // Replace <K8s-Service-IP> with the external IP or LoadBalancer URL of your service
-                sh 'curl -f http://35.166.171.0:8080 || exit 1'
-            }
-        }
+    stage('Build Docker image') {
+      steps {
+        sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
+      }
     }
-
-    post {
-        success {
-            echo 'Pipeline completed successfully!'
+    stage('Push to Docker Hub') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: "${env.DOCKERHUB_CRED}", usernameVariable: 'DU', passwordVariable: 'DP')]) {
+          sh '''
+            echo "$DP" | docker login -u "$DU" --password-stdin
+            docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
+            docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest
+            docker push ${DOCKER_IMAGE}:latest
+          '''
         }
-        failure {
-            echo 'Pipeline failed!'
+      }
+    }
+    stage('Deploy to minikube on app-server') {
+      steps {
+        sshagent (credentials: ["${env.APP_SSH_CRED}"]) {
+          sh """
+            ssh -o StrictHostKeyChecking=no ${APP_HOST} '
+              set -e
+              # ensure kubectl context is minikube on app-server
+              kubectl -n default get deploy || true
+              # update image
+              kubectl set image deployment/petclinic petclinic=${DOCKER_IMAGE}:latest --record || true
+              # if deployment doesn't exist, apply manifests
+              if ! kubectl get deploy petclinic >/dev/null 2>&1; then
+                # replace placeholder in manifest and apply
+                sed -i \"s|DOCKERHUB_USER/petclinic:latest|${DOCKER_IMAGE}:latest|g\" /home/ubuntu/k8s/deployment.yaml || true
+                kubectl apply -f /home/ubuntu/k8s/deployment.yaml
+                kubectl apply -f /home/ubuntu/k8s/service-nodeport.yaml
+              fi
+            '
+          """
         }
+      }
     }
 }
