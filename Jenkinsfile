@@ -52,41 +52,44 @@ pipeline {
             }
         }
 
-       stage('Deploy to minikube on app-server') {
-           steps {
-               sshagent (credentials: ['app-server-ssh']) {
-                   sh """
-                   ssh -o StrictHostKeyChecking=no ${APP_HOST} '
-                   set -e
-                   # Install git if not present
-                   which git || sudo apt-get update && sudo apt-get install -y git
-
-                   # Clone (or pull) your repo with k8s manifests
-                   if [ ! -d ~/spring-petclinic ]; then
-                   git clone https://github.com/tsaisreekar/spring-petclinic.git ~/spring-petclinic
-                   else
-                   cd ~/spring-petclinic && git pull
-                   fi
-
-                   # Set KUBECONFIG if using minikube
-                   export KUBECONFIG=$HOME/.kube/config
+       stage('Deploy to EKS Cluster') {
+              steps {
+                sshagent (credentials: ['app-server-ssh']) {
+                  sh """
+                  ssh -o StrictHostKeyChecking=no ${APP_HOST} '
+                  set -e
             
-                   # Ensure minikube is running
-                   minikube status || minikube start
+                  # Install git if not present
+                  which git || sudo apt-get update && sudo apt-get install -y git
             
-                   # Update image
-                   kubectl -n default get deploy || true
-                   kubectl set image deployment/petclinic petclinic=${DOCKER_IMAGE}:latest --record || true
-                   # Apply manifests if deployment does not exist
-                   if ! kubectl get deploy petclinic >/dev/null 2>&1; then
-                   kubectl apply -f ~/spring-petclinic/k8s/deployment.yaml
-                   kubectl apply -f ~/spring-petclinic/k8s/service-nodeport.yaml
-                   fi
+                  # Clone (or pull) your repo with k8s manifests
+                  if [ ! -d ~/spring-petclinic ]; then
+                    git clone https://github.com/tsaisreekar/spring-petclinic.git ~/spring-petclinic
+                  else
+                    cd ~/spring-petclinic && git pull
+                  fi
+            
+                  # Ensure kubeconfig is set for EKS
+                  mkdir -p ~/.kube
+                  aws eks --region ${AWS_REGION} update-kubeconfig --name ${EKS_CLUSTER_NAME} --kubeconfig ~/.kube/config
+            
+                  export KUBECONFIG=$HOME/.kube/config
+            
+                  # Update image in existing deployment
+                  kubectl -n default get deploy petclinic >/dev/null 2>&1 && \
+                  kubectl set image deployment/petclinic petclinic=${DOCKER_IMAGE}:latest --record || true
+            
+                  # If deployment doesn’t exist, apply manifests
+                  if ! kubectl get deploy petclinic >/dev/null 2>&1; then
+                    kubectl apply -f ~/spring-petclinic/k8s/deployment.yaml
+                    kubectl apply -f ~/spring-petclinic/k8s/service-loadbalancer.yaml
+                  fi
                   '
                   """
                 }
               }
-            }
+}
+
 
         stage('Smoke Test') {
             steps {
